@@ -1089,6 +1089,7 @@ parser_delete_remote_backup_server.add_argument("--pool", required=True, metavar
 # set default func
 parser_delete_remote_backup_server.set_defaults(func=deleteRemoteBackupServerParser)
 
+# https://stackoverflow.com/questions/48648036/python-argparse-args-has-no-attribute-func
 try:
     os.putenv('LANG', 'en_US.UTF-8')
     args = parser.parse_args()
@@ -1096,3 +1097,4 @@ try:
 except TypeError:
     # print"argument number not enough"
     logger.debug(traceback.format_exc())
+
