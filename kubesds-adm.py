@@ -20,7 +20,7 @@ def execute(f_name, params):
     try:
         check(f_name, params)
         func(params)
-    except ExecuteException, e:
+    except ExecuteException as e:
         logger.debug(f_name)
         logger.debug(params)
         logger.debug(traceback.format_exc())
@@ -89,10 +89,10 @@ def check_pool(f_name, args):
             pool = pool_info['poolname']
             if not is_pool_exists(pool):
                 raise ConditionException(203, "virsh pool %s not exist" % pool)
-    except ExecuteException, e1:
+    except ExecuteException as e1:
         logger.debug(traceback.format_exc())
         error_print(202, "check_pool, cannot get pool info. %s" % e1.message)
-    except ConditionException, e2:
+    except ConditionException as e2:
         logger.debug(traceback.format_exc())
         error_print(e2.code, e2.msg)
 
@@ -180,7 +180,7 @@ def deleteDiskParser(args):
         if disk_info is None:
             helper.delete(args.vol)
             success_print("delete disk %s successful." % args.vol, {})
-    except ExecuteException, e:
+    except ExecuteException as e:
         error_print(400, e.message)
     pool_info = get_pool_info_from_k8s(args.pool)
     pool = pool_info['poolname']
@@ -298,7 +298,7 @@ def deleteExternalSnapshotParser(args):
         if ss_info is None:
             helper.delete(args.name)
             success_print("delete snapshot %s successful." % args.name, {})
-    except ExecuteException, e:
+    except ExecuteException as e:
         error_print(400, e.message)
     pool_info = get_pool_info_from_k8s(args.pool)
     check_pool_active(pool_info)
@@ -363,7 +363,7 @@ def exportVMParser(args):
         execute('exportVM', args)
         vm_heler = K8sHelper('VirtualMachine')
         vm_heler.delete_lifecycle(args.domain)
-    except Exception, e:
+    except Exception as e:
         raise e
 
 
@@ -374,7 +374,7 @@ def backupVMParser(args):
         execute('backupVM', args)
         vm_heler = K8sHelper('VirtualMachine')
         vm_heler.delete_lifecycle(args.domain)
-    except Exception, e:
+    except Exception as e:
         raise e
 
 
