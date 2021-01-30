@@ -28,7 +28,7 @@ def rpcCallWithResult(cmd):
         client = cmdcall_pb2_grpc.CmdCallStub(channel)
         result = loads(str(response.json))
         return result
-    except grpc.RpcError as e:
+    except grpc.RpcError, e:
         logger.debug(traceback.format_exc())
         # ouch!
         # lets print the gRPC error message
@@ -51,4 +51,3 @@ def rpcCallWithResult(cmd):
         raise ExecuteException('RunCmdError', 'can not parse rpc response to json.')
 
 
-print(rpcCallWithResult('cstor-cli pool-list'))

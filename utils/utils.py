@@ -4,6 +4,7 @@ Run back-end command in subprocess.
 import atexit
 import fcntl
 import hashlib
+import operator
 import os
 import re
 import random
@@ -25,12 +26,11 @@ import xmltodict
 import yaml
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-import operator
 
-from utils.k8s import K8sHelper, addPowerStatusMessage, updateJsonRemoveLifecycle, get_hostname_in_lower_case, get_node_name, \
+from .k8s import K8sHelper, addPowerStatusMessage, updateJsonRemoveLifecycle, get_hostname_in_lower_case, get_node_name, \
     replaceData
-from utils.arraylist import vmArray
-from utils.ftp import FtpHelper
+from .arraylist import vmArray
+from .ftp import FtpHelper
 
 try:
     import xml.etree.CElementTree as ET
@@ -39,13 +39,15 @@ except:
 
 import cmdcall_pb2
 import cmdcall_pb2_grpc
-from utils.logger import set_logger
-from utils.exception import ExecuteException
+from . import logger
+from .exception import ExecuteException
 from netutils import get_docker0_IP
+
+DEFARULT_MOUNT_DIR = '/var/lib/libvirt/cstor'
 
 LOG = '/var/log/kubesds.log'
 
-logger = set_logger(os.path.basename(__file__), LOG)
+logger = logger.set_logger(os.path.basename(__file__), LOG)
 
 DEFAULT_PORT = '19999'
 
@@ -78,7 +80,7 @@ def runCmdWithResult(cmd):
                                     continue
                                 error_msg = error_msg + str.strip(line)
                             error_msg = str.strip(error_msg).replace('"', "'")
-                            result['result']['msg'] = '%s. cstor error output: %s' % (
+                            result['result']['msg'] = '%s. error output: %s' % (
                                 result['result']['msg'], error_msg)
                 return result
             except Exception:
@@ -91,7 +93,7 @@ def runCmdWithResult(cmd):
                     error_msg = error_msg + str.strip(line)
                 error_msg = str.strip(error_msg)
                 raise ExecuteException('RunCmdError',
-                                       'can not parse cstor-cli output to json----%s. %s' % (msg, error_msg))
+                                       'can not parse output to json----%s. %s' % (msg, error_msg))
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
@@ -135,7 +137,7 @@ def remoteRunCmdWithResult(ip, cmd):
                                     continue
                                 error_msg = error_msg + str.strip(line)
                             error_msg = str.strip(error_msg).replace('"', "'")
-                            result['result']['msg'] = '%s. cstor error output: %s' % (
+                            result['result']['msg'] = '%s. error output: %s' % (
                                 result['result']['msg'], error_msg)
                 return result
             except Exception:
@@ -148,7 +150,7 @@ def remoteRunCmdWithResult(ip, cmd):
                     error_msg = error_msg + str.strip(line)
                 error_msg = str.strip(error_msg)
                 raise ExecuteException('RunCmdError',
-                                       'can not parse cstor-cli output to json----%s. %s' % (msg, error_msg))
+                                       'can not parse output to json----%s. %s' % (msg, error_msg))
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
@@ -496,6 +498,7 @@ def rpcCallAndTransferKvToJson(cmd):
         logger.debug(traceback.format_exc())
         raise ExecuteException('RunCmdError', 'can not parse rpc response to json.')
 
+
 def rpcCallAndGetOutput(cmd):
     logger.debug(cmd)
     try:
@@ -831,7 +834,7 @@ class CDaemon:
                 if os.path.exists(self.pidfile):
                     os.remove(self.pidfile)
             else:
-                print((str(err)))
+                print(str(err))
                 sys.exit(1)
             if self.verbose >= 1:
                 print('Stopped!')
@@ -887,32 +890,28 @@ def get_IP():
     return myaddr
 
 
-def get_cstor_pool_info(pool):
-    cstor = runCmdWithResult("cstor-cli pool-show --poolname %s" % pool)
-    if cstor['result']['code'] != 0:
-        raise ExecuteException('', 'cstor raise exception: cstor error code: %d, msg: %s, obj: %s' % (
-            cstor['result']['code'], cstor['result']['msg'], cstor['obj']))
-    return cstor['data']
-
-
 def get_pool_info(pool_):
     if not pool_:
         raise ExecuteException('', 'missing parameter: no pool name.')
     result = runCmdAndSplitKvToJson('virsh pool-info %s' % pool_)
+    # if result['state'] == 'running':
+    #     result['state'] = 'active'
+    # else:
+    #     result['state'] = 'inactive'
     # result['allocation'] = int(1024*1024*1024*float(result['allocation']))
     # result['available'] = int(1024 * 1024 * 1024 * float(result['available']))
     # result['code'] = 0
     # result['capacity'] = int(1024 * 1024 * 1024 * float(result['capacity']))
-    if 'allocation' in list(result.keys()):
-        del result['allocation']
-    if 'available' in list(result.keys()):
-        del result['available']
+
+    # if 'allocation' in result.keys():
+    #     del result['allocation']
+    # if 'available' in result.keys():
+    #     del result['available']
 
     xml_dict = runCmdAndTransferXmlToJson('virsh pool-dumpxml %s' % pool_)
     result['capacity'] = int(xml_dict['pool']['capacity']['text'])
     result['path'] = xml_dict['pool']['target']['path']
     return result
-
 
 
 def modify_disk_info_in_k8s(poolname, vol):
@@ -925,13 +924,6 @@ def modify_snapshot_info_in_k8s(poolname, vol, name):
     helper.update(name, "volume", get_snapshot_info_to_k8s(poolname, vol, name))
 
 
-def cstor_pool_active(poolname):
-    cstor = runCmdWithResult('cstor-cli pool-active --poolname %s' % poolname)
-    if cstor['result']['code'] != 0:
-        logger.debug('can not active cstor pool %s' % poolname)
-        raise ExecuteException('', 'can not active cstor pool %s' % poolname)
-
-
 def get_pool_info_from_k8s(pool):
     if not pool:
         raise ExecuteException('', 'missing parameter: no pool name.')
@@ -940,6 +932,7 @@ def get_pool_info_from_k8s(pool):
     if pool_info == None:
         raise ExecuteException('', 'can not get pool info %s from k8s' % pool)
     return pool_info
+
 
 def get_image_info_from_k8s(image):
     if not image:
@@ -957,18 +950,19 @@ def get_vol_info_from_k8s(vol):
         raise ExecuteException('', 'can not get disk info %s from k8s' % vol)
     return vol_info
 
+
 def try_get_diskmn_by_path(disk_path):
     if disk_path.find('snapshots') >= 0:
         disk_mn = os.path.basename(os.path.dirname(os.path.dirname(disk_path)))
     else:
         try:
-            # uus
             vol_info = get_vol_info_from_k8s(os.path.basename(disk_path))
             disk_mn = os.path.basename(disk_path)
         except:
             disk_mn = os.path.basename(os.path.dirname(disk_path))
     vol_info = get_vol_info_from_k8s(disk_mn)
     return disk_mn
+
 
 def get_snapshot_info_from_k8s(snapshot):
     if not snapshot:
@@ -1046,16 +1040,16 @@ def change_vol_current(vol, current):
     helper.update(vol, 'volume', get_disk_info_to_k8s(pool_info['poolname'], vol))
 
 
-def get_pool_info_to_k8s(type, pool, poolname, content):
-    cstor = get_cstor_pool_info(poolname)
+def get_pool_info_to_k8s(type, pool, url, poolname, content):
     result = get_pool_info(poolname)
     result['content'] = content
     result["pooltype"] = type
     result["pool"] = pool
-    result["free"] = cstor['free']
+    result["free"] = result['available']
     result["poolname"] = poolname
-    result["uuid"] = cstor['uuid']
-    if is_pool_started(poolname) and cstor['status'] == 'active':
+    result["uuid"] = poolname
+    result["url"] = url
+    if is_pool_started(poolname):
         result["state"] = "active"
     else:
         result["state"] = "inactive"
@@ -1101,25 +1095,6 @@ def get_remote_node_all_nic_ip(remote):
     except:
         logger.debug(traceback.format_exc())
     return ips
-
-
-def get_cstor_disk_info_to_k8s(pool, poolname, vol):
-    disk_info_k8s = get_vol_info_from_k8s(vol)
-    diskinfo = runCmdWithResult("cstor-cli vdisk-show --poolname %s --name %s" % (poolname, vol))
-    if diskinfo['result']['code'] != 0:
-        raise ExecuteException('', 'cstor raise exception: cstor error code: %d, msg: %s, obj: %s' % (
-            diskinfo['result']['code'], diskinfo['result']['msg'], diskinfo['obj']))
-
-    result = {
-        "disk": vol,
-        "pool": pool,
-        "poolname": poolname,
-        "uni": diskinfo["data"]["uni"],
-        "current": disk_info_k8s["current"],
-        "virtual_size": diskinfo["data"]["size"],
-        "filename": disk_info_k8s["filename"]
-    }
-    return result
 
 
 def get_snapshot_info_to_k8s(poolname, vol, name):
@@ -1384,8 +1359,6 @@ def try_fix_disk_metadata(path):
 
     vol_info = get_vol_info_from_k8s(disk)
     pool_info = get_pool_info_from_k8s(vol_info['pool'])
-    if pool_info['pooltype'] == 'uus':
-        return None
     try:
         config_file = '%s/config.json' % disk_dir
         logger.debug("config_file: %s" % config_file)
@@ -1544,61 +1517,32 @@ def is_vm_disk_driver_cache_none(vm):
                     return False
     return True
 
+
 def remote_start_pool(ip, pool):
     pool_info = get_pool_info_from_k8s(pool)
     remoteRunCmd(ip, 'kubesds-adm startPool --type %s --pool %s' % (pool_info['pooltype'], pool))
 
-def pool_active(pool):
+
+def auto_mount(pool):
     pool_info = get_pool_info_from_k8s(pool)
-    poolname = pool_info['poolname']
-    cstor = runCmdWithResult('cstor-cli pool-active --poolname %s' % poolname)
-    if cstor['result']['code'] != 0 or cstor['data']['status'] != 'active':
-        raise ExecuteException('', 'cstor raise exception: cstor error code: %d, msg: %s, obj: %s' % (
-            cstor['result']['code'], cstor['result']['msg'], cstor['obj']))
-    if pool_info['pooltype'] != 'vdiskfs':
-        return
 
-    # make other vdiskfs pool inactive
-    pool_path = '%s/%s' % (cstor['data']['mountpath'], poolname)
-    pools = get_pools_by_path(pool_path)
-    node_name = get_hostname_in_lower_case()
-    poolHelper = K8sHelper('VirtualMachinePool')
-    for vmp in pools:
-        if vmp['host'] != node_name:
-            pinfo = get_pool_info_from_k8s(vmp['pool'])
-            pinfo['state'] = 'inactive'
-            poolHelper.update(vmp['pool'], 'pool', pinfo)
-        else:
-            pinfo = get_pool_info_from_k8s(vmp['pool'])
-            if pinfo['state'] != 'active':
-                pinfo['state'] = 'active'
-                poolHelper.update(vmp['pool'], 'pool', pinfo)
+    MOUNT_PATH = os.path.dirname(pool_info['poolpath'])
+    runCmd()
 
-    # change all disk and snapshot to this node
-    all_disk = get_pool_all_disk(poolname)
-    logger.debug("all_disk")
-    logger.debug(dumps(all_disk))
-    logger.debug(pool)
-    if all_disk:
-        disk_helper = K8sHelper('VirtualMachineDisk')
-        for disk in all_disk:
-            disk_helper.change_node(disk['disk'], node_name)
-            volume = disk_helper.get_data(disk['disk'], 'volume')
-            volume['pool'] = pool
-            disk_helper.update(disk['disk'], 'volume', volume)
+    proto = pool_info['pooltype']
+    # opt = pool_info['uni']
+    opt = ''
+    url = pool_info['unl']
 
-            config = get_disk_config(pool_info['poolname'], disk['disk'])
-            write_config(config['name'], config['dir'], config['current'], pool,
-                         config['poolname'])
+    runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (proto, opt, url, MOUNT_PATH))
 
-        all_ss = get_pool_all_ss(poolname)
-        if all_ss:
-            ss_helper = K8sHelper('VirtualMachineDiskSnapshot')
-            for ss in all_ss:
-                ss_helper.change_node(ss['ss'], node_name)
-                volume = ss_helper.get_data(ss['ss'], 'volume')
-                volume['pool'] = pool
-                disk_helper.update(ss['ss'], 'volume', volume)
+
+def mount_storage(pooltype, opt, url, path):
+    runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (pooltype, opt, url, path))
+
+
+def pool_active(pool):
+    auto_mount(pool)
 
 
 def get_pool_all_disk(poolname):
@@ -1800,60 +1744,44 @@ def get_disk_jsondict(pool, disk):
     #     raise ExecuteException("RunCmdError", "not support pool type %s" % pool_info['pooltype'])
 
     if disk_helper.exist(disk):  # migrate disk or migrate vm
-        if pool_info['pooltype'] in ['localfs', 'nfs', 'glusterfs', 'vdiskfs']:
-            disk_jsondict = disk_helper.get(disk)
-            # update disk jsondict
-            disk_jsondict['metadata']['labels']['host'] = pool_node_name
+        disk_jsondict = disk_helper.get(disk)
+        # update disk jsondict
+        disk_jsondict['metadata']['labels']['host'] = pool_node_name
 
-            spec = get_spec(disk_jsondict)
+        spec = get_spec(disk_jsondict)
+        logger.debug(disk_jsondict)
+        if spec:
+            nodeName = spec.get('nodeName')
+            if nodeName:
+                spec['nodeName'] = pool_node_name
+            # disk_dir = '%s/%s' % (pool_info['path'], disk)
+            # config = get_disk_config(pool, disk)
+            # write_config(disk, disk_dir, config['current'], pool, config['poolname'])
+            disk_info = get_disk_info_to_k8s(pool_info['poolname'], disk)
+            spec['volume'] = disk_info
             logger.debug(disk_jsondict)
-            if spec:
-                nodeName = spec.get('nodeName')
-                if nodeName:
-                    spec['nodeName'] = pool_node_name
-                # disk_dir = '%s/%s' % (pool_info['path'], disk)
-                # config = get_disk_config(pool, disk)
-                # write_config(disk, disk_dir, config['current'], pool, config['poolname'])
-                disk_info = get_disk_info_to_k8s(pool_info['poolname'], disk)
-                spec['volume'] = disk_info
-                logger.debug(disk_jsondict)
-                jsondicts.append(disk_jsondict)
-            # update snapshot jsondict
-            ss_helper = K8sHelper('VirtualMachineDiskSnapshot')
-            ss_dir = '%s/%s/snapshots' % (pool_info['path'], disk)
-            if os.path.exists(ss_dir):
-                for ss in os.listdir(ss_dir):
-                    try:
-                        ss_jsondict = ss_helper.get(ss)
+            jsondicts.append(disk_jsondict)
+        # update snapshot jsondict
+        ss_helper = K8sHelper('VirtualMachineDiskSnapshot')
+        ss_dir = '%s/%s/snapshots' % (pool_info['path'], disk)
+        if os.path.exists(ss_dir):
+            for ss in os.listdir(ss_dir):
+                try:
+                    ss_jsondict = ss_helper.get(ss)
 
-                        if ss_jsondict and ss_helper.get_data(ss, 'volume')['disk'] == disk:
-                            ss_jsondict['metadata']['labels']['host'] = pool_node_name
-                            spec = get_spec(ss_jsondict)
-                            if spec:
-                                nodeName = spec.get('nodeName')
-                                if nodeName:
-                                    spec['nodeName'] = pool_node_name
-                                ss_info = get_snapshot_info_to_k8s(pool_info['poolname'], disk, ss)
-                                spec['volume'] = ss_info
-                                jsondicts.append(ss_jsondict)
-                    except ExecuteException:
-                        pass
-        else:
-            disk_jsondict = disk_helper.get(disk)
-            # update disk jsondict
-            logger.debug(disk_jsondict)
-            disk_jsondict['metadata']['labels']['host'] = pool_node_name
+                    if ss_jsondict and ss_helper.get_data(ss, 'volume')['disk'] == disk:
+                        ss_jsondict['metadata']['labels']['host'] = pool_node_name
+                        spec = get_spec(ss_jsondict)
+                        if spec:
+                            nodeName = spec.get('nodeName')
+                            if nodeName:
+                                spec['nodeName'] = pool_node_name
+                            ss_info = get_snapshot_info_to_k8s(pool_info['poolname'], disk, ss)
+                            spec['volume'] = ss_info
+                            jsondicts.append(ss_jsondict)
+                except ExecuteException:
+                    pass
 
-            spec = get_spec(disk_jsondict)
-            logger.debug(disk_jsondict)
-            if spec:
-                nodeName = spec.get('nodeName')
-                if nodeName:
-                    spec['nodeName'] = pool_node_name
-                disk_info = get_cstor_disk_info_to_k8s(pool, pool_info['poolname'], disk)
-                spec['volume'] = disk_info
-                logger.debug(disk_jsondict)
-                jsondicts.append(disk_jsondict)
     else:  # clone disk
         disk_info = get_disk_info_to_k8s(pool_info['poolname'], disk)
         disk_jsondict = disk_helper.get_create_jsondict(disk, 'volume', disk_info)
@@ -1871,6 +1799,7 @@ def get_disk_jsondict(pool, disk):
         #         pass
 
     return jsondicts
+
 
 def modifyDiskAndSs(pool, disk):
     # get disk node label in ip
@@ -1971,7 +1900,8 @@ def apply_all_jsondict(jsondicts):
             return
         except ExecuteException as e:
             logger.debug(e.message)
-            if e.message.find('Warning') >= 0 or e.message.find('failed to open a connection to the hypervisor software') >= 0:
+            if e.message.find('Warning') >= 0 or e.message.find(
+                    'failed to open a connection to the hypervisor software') >= 0:
                 pass
     raise ExecuteException('RunCmdError', 'can not apply jsondict %s on k8s.' % dumps(jsondicts))
 
@@ -2003,7 +1933,6 @@ def create_all_jsondict(jsondicts):
                     'failed to open a connection to the hypervisor software') >= 0:
                 pass
     raise ExecuteException('RunCmdError', 'can not apply jsondict %s on k8s.' % dumps(jsondicts))
-
 
 
 def get_node_ip_by_node_name(nodeName):
@@ -2552,40 +2481,13 @@ def check_pool_active(info):
 
     if this_node_name == pool_node_name and info['state'] == 'active':
         try:
-            cstor_pool_active(info['poolname'])
-            if info['pooltype'] != 'uus' and not is_pool_started(info['poolname']):
+            auto_mount(info['pool'])
+            if not is_pool_started(info['poolname']):
                 runCmd('virsh pool-start %s' % info['poolname'])
         except ExecuteException as e:
             error_print(221, e.message)
 
-    cstor = get_cstor_pool_info(info['poolname'])
-
-    if info['pooltype'] == 'uus':
-        result = {
-            "pooltype": info['pooltype'],
-            "pool": info['pool'],
-            "poolname": info['poolname'],
-            "capacity": cstor["total"],
-            "autostart": "no",
-            "path": cstor["mountpath"],
-            "free": cstor["free"],
-            "state": cstor["status"],
-            "uuid": cstor["uuid"],
-            "content": 'vmd'
-        }
-    else:
-        result = get_pool_info(info['poolname'])
-        if is_pool_started(info['poolname']) and cstor['status'] == 'active':
-            result['state'] = "active"
-        else:
-            result['state'] = "inactive"
-        result['content'] = info["content"]
-        result["pooltype"] = info["pooltype"]
-        result["pool"] = info["pool"]
-        result["poolname"] = info["poolname"]
-        result["free"] = cstor["free"]
-        result["uuid"] = cstor["uuid"]
-
+    result = get_pool_info_to_k8s(info['pooltype'], info['pool'], info['url'], info['poolname'], info['content'])
     # update pool
     if operator.eq(info, result) != 0:
         k8s = K8sHelper('VirtualMachinePool')
@@ -2606,24 +2508,22 @@ def change_k8s_pool_state(pool, state):
 
 
 def success_print(msg, data):
-    print((dumps({"result": {"code": 0, "msg": msg}, "data": data})))
+    print(dumps({"result": {"code": 0, "msg": msg}, "data": data}))
     exit(0)
 
 
 def error_print(code, msg, data=None):
     if data is None:
-        print((dumps({"result": {"code": code, "msg": msg}, "data": {}})))
+        print(dumps({"result": {"code": code, "msg": msg}, "data": {}}))
         exit(1)
     else:
-        print((dumps({"result": {"code": code, "msg": msg}, "data": data})))
+        print(dumps({"result": {"code": code, "msg": msg}, "data": data}))
         exit(1)
 
 
 if __name__ == '__main__':
-    print((rpcCallAndGetOutput('ls /root')))
+    print(rpcCallAndGetOutput('ls /root'))
     # print is_pool_started("170dd9accdd174caced76b0db2230")
-    # print checksum('/var/lib/libvirt/cstor/170dd9accdd174caced76b0db2230/170dd9accdd174caced76b0db2230/vmbackup/wintest/diskbackup/backuptest1/44ec55a677c84c02b67517562e9ae2fe/diskbackup/backuptest1')
-    # print checksum('/var/lib/libvirt/cstor/170dd9accdd174caced76b0db2230/170dd9accdd174caced76b0db2230/wintest/wintest')
     # print get_all_node_ip()
     # check_pool_active(get_pool_info_from_k8s('migratenodepool22'))
     # print is_vm_exist('dsadada')
@@ -2633,17 +2533,10 @@ if __name__ == '__main__':
     # pool_helper.delete_lifecycle('migratepoolnodepool22')
     # print get_os_disk("cloudinitbackup")
 
-    # print checksum('/var/lib/libvirt/cstor/a639873f92a24a9ab840492f0e538f2b/a639873f92a24a9ab840492f0e538f2b/vmbackuptestdisk1/vmbackuptestdisk1')
     # print get_pools_by_node('vm.node25')
     # print get_pool_info_from_k8s('7daed7737ea0480eb078567febda62ea')
     # jsondicts = get_migrate_disk_jsondict('vm006migratedisk1', 'migratepoolnode35')
     # apply_all_jsondict(jsondicts)
-    # print remoteRunCmdWithResult('133.133.135.35', 'cstor-cli pool-show --poolname pooldir')
-# try:
-#     result = runCmdWithResult('cstor-cli pooladd-nfs --poolname abc --url /mnt/localfs/pooldir11')
-#     print result
-# except ExecuteException, e:
-#     print e.message
 # print get_snapshot_info_from_k8s('disktestd313.2')
 # print get_pool_info(' node22-poolnfs')
 # print is_vm_disk_not_shared_storage('vm006')

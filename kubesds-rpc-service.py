@@ -20,7 +20,7 @@ sys.path.append('%s/' % os.path.dirname(os.path.realpath(__file__)))
 
 from utils import logger
 from utils.utils import CDaemon, singleton, runCmdWithResult, runCmdAndGetOutput, runCmd, runCmdAndTransferXmlToJson, \
-    runCmdAndSplitKvToJson, get_pools_by_node, get_pool_info_from_k8s, pool_active
+    runCmdAndSplitKvToJson, get_pools_by_node, get_pool_info_from_k8s, pool_active, auto_mount
 
 import cmdcall_pb2, cmdcall_pb2_grpc  # 刚刚生产的两个文件
 
@@ -189,17 +189,10 @@ def run_server():
     pools = get_pools_by_node(node_name)
     for pool in pools:
         try:
-            pool_info = get_pool_info_from_k8s(pool['pool'])
-            if pool_info['pooltype'] == 'vdiskfs':
-                if pool_info['state'] == 'active':
-                    pool_active(pool_info['pool'])
-            else:
-                op = Operation('cstor-cli pool-active ', {'poolname': pool['poolname']}, with_result=True)
-                cstor = op.execute()
-                if cstor['result']['code'] != 0 or cstor['data']['status'] != 'active':
-                    logger.debug('can not auto mount cstor pool %s' % pool['poolname'])
+            # // auto_mount
+            auto_mount(pool['pool'])
         except ExecuteException as e:
-            logger.debug('can not auto mount cstor pool %s' % pool['poolname'])
+            logger.debug('can not auto mount pool %s' % pool['poolname'])
 
 
     return server
