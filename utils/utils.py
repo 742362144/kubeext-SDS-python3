@@ -61,9 +61,24 @@ def runCmdWithResult(cmd):
     try:
         std_out = p.stdout.readlines()
         std_err = p.stderr.readlines()
+
+        if std_out:
+            for index, line in enumerate(std_out):
+                if not str.strip(line.decode("utf-8")):
+                    continue
+                if index == len(std_out) - 1:
+                    line = str.strip(line.decode("utf-8")) + '. '
+                    msg = msg + line
+                else:
+                    line = str.strip(line.decode("utf-8")) + ', '
+                    msg = msg + line
+                print(line)
+
+
         if std_out:
             msg = ''
             for index, line in enumerate(std_out):
+                line = line.decode("utf-8")
                 if not str.strip(line):
                     continue
                 msg = msg + str.strip(line)
@@ -76,6 +91,7 @@ def runCmdWithResult(cmd):
                         if std_err:
                             error_msg = ''
                             for index, line in enumerate(std_err):
+                                line = line.decode("utf-8")
                                 if not str.strip(line):
                                     continue
                                 error_msg = error_msg + str.strip(line)
@@ -88,6 +104,7 @@ def runCmdWithResult(cmd):
                 logger.debug(traceback.format_exc())
                 error_msg = ''
                 for index, line in enumerate(std_err):
+                    line = line.decode("utf-8")
                     if not str.strip(line):
                         continue
                     error_msg = error_msg + str.strip(line)
@@ -97,6 +114,7 @@ def runCmdWithResult(cmd):
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 msg = msg + line + ', '
             logger.debug(cmd)
             logger.debug(msg)
@@ -121,6 +139,7 @@ def remoteRunCmdWithResult(ip, cmd):
         if std_out:
             msg = ''
             for index, line in enumerate(std_out):
+                line = line.decode("utf-8")
                 if not str.strip(line):
                     continue
                 msg = msg + str.strip(line)
@@ -133,6 +152,7 @@ def remoteRunCmdWithResult(ip, cmd):
                         if std_err:
                             error_msg = ''
                             for index, line in enumerate(std_err):
+                                line = line.decode("utf-8")
                                 if not str.strip(line):
                                     continue
                                 error_msg = error_msg + str.strip(line)
@@ -145,6 +165,7 @@ def remoteRunCmdWithResult(ip, cmd):
                 logger.debug(traceback.format_exc())
                 error_msg = ''
                 for index, line in enumerate(std_err):
+                    line = line.decode("utf-8")
                     if not str.strip(line):
                         continue
                     error_msg = error_msg + str.strip(line)
@@ -154,6 +175,7 @@ def remoteRunCmdWithResult(ip, cmd):
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 msg = msg + line + ', '
             logger.debug(cmd)
             logger.debug(msg)
@@ -178,11 +200,13 @@ def remoteRunCmdWithOutput(ip, cmd):
         if std_out:
             msg = ''
             for line in std_out:
+                line = line.decode("utf-8")
                 msg = msg + line
             return msg
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 if not str.strip(line):
                     continue
                 if index == len(std_err) - 1:
@@ -219,6 +243,7 @@ def runCmdAndSplitKvToJson(cmd):
         if std_out:
             result = {}
             for index, line in enumerate(std_out):
+                line = line.decode("utf-8")
                 if not str.strip(line):
                     continue
                 line = str.strip(line)
@@ -229,6 +254,7 @@ def runCmdAndSplitKvToJson(cmd):
         if std_err:
             error_msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 if not str.strip(line):
                     continue
                 else:
@@ -254,11 +280,13 @@ def runCmdAndGetOutput(cmd):
         if std_out:
             msg = ''
             for line in std_out:
+                line = line.decode("utf-8")
                 msg = msg + line
             return msg
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 if not str.strip(line):
                     continue
                 if index == len(std_err) - 1:
@@ -292,6 +320,7 @@ def remoteRunCmd(ip, cmd):
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 msg = msg + line
             if msg.strip() != '':
                 raise ExecuteException('RunCmdError', msg)
@@ -331,6 +360,7 @@ def runCmd(cmd):
         if std_err:
             msg = ''
             for index, line in enumerate(std_err):
+                line = line.decode("utf-8")
                 msg = msg + line
             logger.debug(msg)
             if msg.strip() != '' and p.returncode != 0:
@@ -1526,13 +1556,19 @@ def remote_start_pool(ip, pool):
 def auto_mount(pool):
     pool_info = get_pool_info_from_k8s(pool)
 
-    MOUNT_PATH = os.path.dirname(pool_info['poolpath'])
-    runCmd()
-
     proto = pool_info['pooltype']
     # opt = pool_info['uni']
     opt = ''
     url = pool_info['unl']
+
+    MOUNT_PATH = os.path.dirname(pool_info['poolpath'])
+    if not os.path.exists(MOUNT_PATH):
+        os.makedirs(MOUNT_PATH)
+
+    output = runCmdAndGetOutput('df %s' % MOUNT_PATH)
+    for line in output.splitlines():
+        if line.find(url) >= 0:
+            return
 
     runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (proto, opt, url, MOUNT_PATH))
 

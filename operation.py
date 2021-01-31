@@ -596,20 +596,17 @@ def createDiskFromImage(params):
 
 def disk_prepare(pool, vol, uni):
     # // prepare
-    op = Operation('vdisk-prepare ', {'poolname': pool, 'name': vol,
-                                                'uni': uni}, with_result=True)
-    cstor = op.execute()
-    if cstor['result']['code'] != 0:
-        raise ExecuteException('', 'cstor raise exception: cstor error code: %d, msg: %s, obj: %s' % (
-            cstor['result']['code'], cstor['result']['msg'], cstor['obj']))
-    return cstor
+    vol_info = get_vol_info_from_k8s(vol)
+    # pool_info = get_pool_info_from_k8s(vol_info['pool'])
+    # op = Operation('vdisk-prepare ', {'poolname': pool, 'name': vol,
+    #                                             'uni': uni}, with_result=True)
+    auto_mount(vol_info['pool'])
 
 
 def remote_disk_prepare(ip, pool, vol, uni):
     # // remote prepare
 
-    op = Operation('vdisk-prepare ', {'poolname': pool, 'name': vol,
-                                                'uni': uni}, remote=True, ip=ip, with_result=True)
+    op = Operation('kubesds-adm prepareDisk ', {'vol': vol}, remote=True, ip=ip, with_result=True)
     cstor = op.execute()
     if cstor['result']['code'] != 0:
         raise ExecuteException('',
