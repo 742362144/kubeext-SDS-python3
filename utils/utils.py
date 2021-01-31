@@ -924,22 +924,18 @@ def get_pool_info(pool_):
     if not pool_:
         raise ExecuteException('', 'missing parameter: no pool name.')
     result = runCmdAndSplitKvToJson('virsh pool-info %s' % pool_)
-    # if result['state'] == 'running':
-    #     result['state'] = 'active'
-    # else:
-    #     result['state'] = 'inactive'
     # result['allocation'] = int(1024*1024*1024*float(result['allocation']))
     # result['available'] = int(1024 * 1024 * 1024 * float(result['available']))
     # result['code'] = 0
     # result['capacity'] = int(1024 * 1024 * 1024 * float(result['capacity']))
-
-    # if 'allocation' in result.keys():
-    #     del result['allocation']
-    # if 'available' in result.keys():
-    #     del result['available']
+    if 'allocation' in result.keys():
+        del result['allocation']
+    if 'available' in result.keys():
+        del result['available']
 
     xml_dict = runCmdAndTransferXmlToJson('virsh pool-dumpxml %s' % pool_)
     result['capacity'] = int(xml_dict['pool']['capacity']['text'])
+    result['available'] = int(xml_dict['pool']['capacity']['text'])
     result['path'] = xml_dict['pool']['target']['path']
     return result
 
@@ -1565,16 +1561,19 @@ def auto_mount(pool):
     if not os.path.exists(MOUNT_PATH):
         os.makedirs(MOUNT_PATH)
 
-    output = runCmdAndGetOutput('df %s' % MOUNT_PATH)
-    for line in output.splitlines():
-        if line.find(url) >= 0:
-            return
+    if pool_info['pooltype'] == 'nfs':
+        output = runCmdAndGetOutput('df %s' % MOUNT_PATH)
+        for line in output.splitlines():
+            if line.find(url) >= 0:
+                return
 
-    runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (proto, opt, url, MOUNT_PATH))
+        runCmd(
+            'timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (proto, opt, url, MOUNT_PATH))
 
 
 def mount_storage(pooltype, opt, url, path):
-    runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (pooltype, opt, url, path))
+    if pooltype == 'nfs':
+        runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (pooltype, opt, url, path))
 
 
 def pool_active(pool):
@@ -2558,7 +2557,8 @@ def error_print(code, msg, data=None):
 
 
 if __name__ == '__main__':
-    print(rpcCallAndGetOutput('ls /root'))
+    print(get_pool_info('07098ca5fd174fccafee76b0d7fccde4'))
+    print(runCmdAndTransferXmlToJson('virsh pool-dumpxml 07098ca5fd174fccafee76b0d7fccde4'))
     # print is_pool_started("170dd9accdd174caced76b0db2230")
     # print get_all_node_ip()
     # check_pool_active(get_pool_info_from_k8s('migratenodepool22'))
