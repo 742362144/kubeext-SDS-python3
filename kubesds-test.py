@@ -5,7 +5,7 @@ from operation import *
 from utils import logger
 from utils.exception import ConditionException
 
-LOG = "/var/log/kubesds.log"
+LOG = "/var/log/kubesds3.log"
 
 logger = logger.set_logger(os.path.basename(__file__), LOG)
 
@@ -1096,7 +1096,7 @@ test_args = []
 
 dir1 = parser.parse_args(["createPool", "--type", "localfs", "--pool", "pooldir", "--url", "/mnt/localfs/pooldir", "--content", "vmd", "--uuid", "07098ca5fd174fccafee76b0d7fccde4"])
 dir2 = parser.parse_args(["createDisk", "--type", "localfs", "--pool", "pooldir", "--vol", "diskdir", "--capacity", "1073741824", "--format", "qcow2"])
-dir3 = parser.parse_args(["prepareDisk", "--path", "/mnt/localfs/pooldir/pooldir/diskdir/diskdir"])
+dir3 = parser.parse_args(["prepareDisk", "--path", "/var/lib/libvirt/cstor/07098ca5fd174fccafee76b0d7fccde4/07098ca5fd174fccafee76b0d7fccde4/diskdir/diskdir"])
 dir4 = parser.parse_args(["createExternalSnapshot", "--type", "localfs", "--pool", "pooldir", "--vol", "diskdir", "--name", "diskdir.1", "--format", "qcow2"])
 dir5 = parser.parse_args(["createExternalSnapshot", "--type", "localfs", "--pool", "pooldir", "--vol", "diskdir", "--name", "diskdir.2", "--format", "qcow2"])
 dir6 = parser.parse_args(["revertExternalSnapshot", "--type", "localfs", "--pool", "pooldir", "--vol", "diskdir", "--name", "diskdir.1", "--format", "qcow2"])
@@ -1195,6 +1195,7 @@ test_args.append(dir15)
 for args in test_args:
     try:
         args.func(args)
-    except TypeError:
+    except Exception:
         print(traceback.format_exc())
         logger.debug(traceback.format_exc())
+        exit(1)

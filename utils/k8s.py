@@ -32,7 +32,7 @@ config_raw.read(cfg)
 
 config.load_kube_config(config_file=config_raw.get('Kubernetes', 'token_file'))
 
-LOG = '/var/log/kubesds.log'
+LOG = '/var/log/kubesds3.log'
 
 RETRY_TIMES = 30
 

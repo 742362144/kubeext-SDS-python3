@@ -5,7 +5,7 @@ from operation import *
 from utils import logger
 from utils.exception import ConditionException
 
-LOG = "/var/log/kubesds.log"
+LOG = "/var/log/kubesds3.log"
 
 logger = logger.set_logger(os.path.basename(__file__), LOG)
 

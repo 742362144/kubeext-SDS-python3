@@ -45,7 +45,7 @@ from netutils import get_docker0_IP
 
 DEFARULT_MOUNT_DIR = '/var/lib/libvirt/cstor'
 
-LOG = '/var/log/kubesds.log'
+LOG = '/var/log/kubesds3.log'
 
 logger = logger.set_logger(os.path.basename(__file__), LOG)
 
@@ -61,20 +61,6 @@ def runCmdWithResult(cmd):
     try:
         std_out = p.stdout.readlines()
         std_err = p.stderr.readlines()
-
-        if std_out:
-            for index, line in enumerate(std_out):
-                if not str.strip(line.decode("utf-8")):
-                    continue
-                if index == len(std_out) - 1:
-                    line = str.strip(line.decode("utf-8")) + '. '
-                    msg = msg + line
-                else:
-                    line = str.strip(line.decode("utf-8")) + ', '
-                    msg = msg + line
-                print(line)
-
-
         if std_out:
             msg = ''
             for index, line in enumerate(std_out):
@@ -1037,6 +1023,7 @@ def get_disk_info(ss_path):
         try:
             result = runCmdWithResult('qemu-img info --output json %s' % ss_path)
         except:
+            logger.debug(traceback.format_exc())
             error_print(400, "can't get snapshot info in qemu-img.")
             exit(1)
     json_str = dumps(result)
@@ -1146,6 +1133,7 @@ def get_sn_chain(ss_path):
         try:
             result = runCmdWithResult('qemu-img info --backing-chain --output json %s' % ss_path)
         except:
+            logger.debug(traceback.format_exc())
             error_print(400, "can't get snapshot info in qemu-img.")
             exit(1)
     return result
@@ -1553,11 +1541,11 @@ def auto_mount(pool):
     pool_info = get_pool_info_from_k8s(pool)
 
     proto = pool_info['pooltype']
-    # opt = pool_info['uni']
+    # opt = pool_info['url']
     opt = ''
-    url = pool_info['unl']
+    url = pool_info['url']
 
-    MOUNT_PATH = os.path.dirname(pool_info['poolpath'])
+    MOUNT_PATH = os.path.dirname(pool_info['path'])
     if not os.path.exists(MOUNT_PATH):
         os.makedirs(MOUNT_PATH)
 
@@ -2544,16 +2532,16 @@ def change_k8s_pool_state(pool, state):
 
 def success_print(msg, data):
     print(dumps({"result": {"code": 0, "msg": msg}, "data": data}))
-    exit(0)
+    # exit(0)
 
 
 def error_print(code, msg, data=None):
     if data is None:
         print(dumps({"result": {"code": code, "msg": msg}, "data": {}}))
-        exit(1)
+        # exit(1)
     else:
         print(dumps({"result": {"code": code, "msg": msg}, "data": data}))
-        exit(1)
+        # exit(1)
 
 
 if __name__ == '__main__':

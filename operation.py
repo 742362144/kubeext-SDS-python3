@@ -4,7 +4,7 @@ from utils.k8s import get_node_name, get_hostname_in_lower_case
 from utils.utils import *
 from utils import logger
 
-LOG = "/var/log/kubesds.log"
+LOG = "/var/log/kubesds3.log"
 
 logger = logger.set_logger(os.path.basename(__file__), LOG)
 
@@ -112,6 +112,9 @@ def createPool(params):
     #     url = '%s;%s' % (params.url, params.opt)
 
     result = get_pool_info_to_k8s(params.type, params.pool, params.url, params.uuid, params.content)
+
+    pool_helper = K8sHelper('VirtualMachinePool')
+    pool_helper.create(params.pool, 'pool', result)
 
     success_print("create pool %s successful." % params.pool, result)
 
@@ -234,6 +237,10 @@ def createDisk(params):
 
     result = qemu_create_disk(params.pool, poolname, params.vol, params.format, params.capacity)
     uni = result["uni"]
+
+    vol_helper = K8sHelper('VirtualMachineDisk')
+    vol_helper.create(params.vol, 'volume', result)
+
     success_print("create disk %s successful." % params.vol, result)
 
 
@@ -423,6 +430,10 @@ def resizeDisk(params):
     op.execute()
 
     result = get_disk_info_to_k8s(poolname, params.vol)
+
+    vol_helper = K8sHelper('VirtualMachineDisk')
+    vol_helper.create(params.vol, 'volume', result)
+
     success_print("success resize disk %s." % params.vol, result)
 
 
@@ -596,11 +607,20 @@ def createDiskFromImage(params):
 
 def disk_prepare(pool, vol, uni):
     # // prepare
-    vol_info = get_vol_info_from_k8s(vol)
+    logger.debug(pool)
+    logger.debug(vol)
+    logger.debug(uni)
+    dp = None
+    try:
+        vol_info = get_vol_info_from_k8s(vol)
+        dp = vol_info['pool']
+    except:
+        ss_info = get_snapshot_info_from_k8s(vol)
+        dp = ss_info['pool']
     # pool_info = get_pool_info_from_k8s(vol_info['pool'])
     # op = Operation('vdisk-prepare ', {'poolname': pool, 'name': vol,
     #                                             'uni': uni}, with_result=True)
-    auto_mount(vol_info['pool'])
+    auto_mount(dp)
 
 
 def remote_disk_prepare(ip, pool, vol, uni):
@@ -688,9 +708,6 @@ def createExternalSnapshot(params):
                         (params.format, disk_config['current'], params.format, ss_path), {})
         op1.execute()
 
-        # prepare snapshot
-        disk_prepare(poolname, os.path.basename(ss_path), ss_path)
-
         with open('%s/config.json' % disk_config['dir'], "r") as f:
             config = load(f)
             config['current'] = ss_path
@@ -721,9 +738,6 @@ def createExternalSnapshot(params):
                        {})
         op.execute()
 
-        # prepare snapshot
-        disk_prepare(poolname, os.path.basename(ss_path), ss_path)
-
         config_path = '%s/config.json' % os.path.dirname(ss_dir)
         with open(config_path, "r") as f:
             config = load(f)
@@ -734,6 +748,9 @@ def createExternalSnapshot(params):
     result = get_snapshot_info_to_k8s(poolname, params.vol, params.name)
     # modify disk in k8s
     modify_disk_info_in_k8s(poolname, params.vol)
+
+    vol_helper = K8sHelper('VirtualMachineDiskSnapshot')
+    vol_helper.create(params.name, 'volume', result)
 
     success_print("success create disk external snapshot %s" % params.name, result)
 
@@ -784,9 +801,6 @@ def revertExternalSnapshot(params):
         config['current'] = new_file_path
     with open('%s/config.json' % disk_config['dir'], "w") as f:
         dump(config, f)
-
-    # prepare snapshot
-    disk_prepare(poolname, os.path.basename(ss_path), ss_path)
 
     # modify disk in k8s
     modify_disk_info_in_k8s(poolname, params.vol)

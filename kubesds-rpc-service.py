@@ -24,7 +24,7 @@ from utils.utils import CDaemon, singleton, runCmdWithResult, runCmdAndGetOutput
 
 import cmdcall_pb2, cmdcall_pb2_grpc  # 刚刚生产的两个文件
 
-LOG = "/var/log/kubesds-rpc.log"
+LOG = "/var/log/kubesds-rpc3.log"
 
 logger = logger.set_logger(os.path.basename(__file__), LOG)
 
