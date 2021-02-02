@@ -28,7 +28,7 @@ def rpcCallWithResult(cmd):
         client = cmdcall_pb2_grpc.CmdCallStub(channel)
         result = loads(str(response.json))
         return result
-    except grpc.RpcError, e:
+    except grpc.RpcError as e:
         logger.debug(traceback.format_exc())
         # ouch!
         # lets print the gRPC error message
@@ -50,4 +50,4 @@ def rpcCallWithResult(cmd):
         logger.debug(traceback.format_exc())
         raise ExecuteException('RunCmdError', 'can not parse rpc response to json.')
 
-
+rpcCallWithResult('ls .')

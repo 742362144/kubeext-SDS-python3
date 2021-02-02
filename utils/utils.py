@@ -1543,25 +1543,43 @@ def auto_mount(pool):
     proto = pool_info['pooltype']
     # opt = pool_info['url']
     opt = ''
-    url = pool_info['url']
 
     MOUNT_PATH = os.path.dirname(pool_info['path'])
     if not os.path.exists(MOUNT_PATH):
         os.makedirs(MOUNT_PATH)
 
-    if pool_info['pooltype'] == 'nfs':
+    if pool_info['pooltype'] == 'nfs' and 'url' in pool_info.keys():
+        url = pool_info['url']
         output = runCmdAndGetOutput('df %s' % MOUNT_PATH)
         for line in output.splitlines():
             if line.find(url) >= 0:
                 return
 
         runCmd(
-            'timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (proto, opt, url, MOUNT_PATH))
+            'timeout --preserve-status --foreground 5 mount -t %s -o %s %s %s >/dev/null' % (
+            proto, opt, url, MOUNT_PATH))
 
 
 def mount_storage(pooltype, opt, url, path):
     if pooltype == 'nfs':
-        runCmd('timeout --preserve-status --foreground 5 mount -t %s %s %s %s >/dev/null' % (pooltype, opt, url, path))
+        runCmd(
+            'timeout --preserve-status --foreground 5 mount -t %s -o %s %s %s >/dev/null' % (pooltype, opt, url, path))
+
+
+def umount_storage(pool):
+    pool_info = get_pool_info_from_k8s(pool)
+
+    proto = pool_info['pooltype']
+    path = pool_info['path']
+    MOUNT_PATH = os.path.dirname(pool_info['path'])
+    if proto == 'nfs' and 'url' in pool_info.keys():
+        url = pool_info['url']
+        output = runCmdAndGetOutput('df %s' % MOUNT_PATH)
+        for line in output.splitlines():
+            if line.find(url) >= 0:
+                runCmd('timeout --preserve-status --foreground 5 umount -f %s >/dev/null' % MOUNT_PATH)
+
+
 
 
 def pool_active(pool):

@@ -129,6 +129,8 @@ def deletePool(params):
         op2 = Operation("virsh pool-undefine", {"pool": poolname})
         op2.execute()
 
+    umount_storage(params.pool)
+
     helper = K8sHelper("VirtualMachinePool")
     helper.delete(params.pool)
     success_print("delete pool %s successful." % params.pool, {})
@@ -137,47 +139,38 @@ def deletePool(params):
 def startPool(params):
     pool_info = get_pool_info_from_k8s(params.pool)
     poolname = pool_info['poolname']
-    if params.type != "uus":
-        if pool_info['pooltype'] == 'vdiskfs':
-            pool_active(pool_info['pool'])
-        if not is_pool_started(pool_info['poolname']):
-            op1 = Operation("virsh pool-start", {"pool": poolname})
-            op1.execute()
-        pool_info["state"] = "active"
-        success_print("start pool %s successful." % params.pool, pool_info)
-    else:
-        error_print(500, "not support operation for uus")
+    if pool_info['pooltype'] == 'vdiskfs':
+        pool_active(pool_info['pool'])
+    if not is_pool_started(pool_info['poolname']):
+        op1 = Operation("virsh pool-start", {"pool": poolname})
+        op1.execute()
+    pool_info["state"] = "active"
+    success_print("start pool %s successful." % params.pool, pool_info)
 
 
 def autoStartPool(params):
-    if params.type != "uus":
-        pool_info = get_pool_info_from_k8s(params.pool)
-        poolname = pool_info['poolname']
-        if params.disable:
-            op = Operation("virsh pool-autostart --disable", {"pool": poolname})
-            op.execute()
-            pool_info["autostart"] = 'no'
-        else:
-            op = Operation("virsh pool-autostart", {"pool": poolname})
-            op.execute()
-            pool_info["autostart"] = 'yes'
-        success_print("autoStart pool %s successful." % params.pool, pool_info)
+    pool_info = get_pool_info_from_k8s(params.pool)
+    poolname = pool_info['poolname']
+    if params.disable:
+        op = Operation("virsh pool-autostart --disable", {"pool": poolname})
+        op.execute()
+        pool_info["autostart"] = 'no'
     else:
-        error_print(500, "not support operation for uus")
+        op = Operation("virsh pool-autostart", {"pool": poolname})
+        op.execute()
+        pool_info["autostart"] = 'yes'
+    success_print("autoStart pool %s successful." % params.pool, pool_info)
 
 
 def stopPool(params):
-    if params.type != "uus":
-        pool_info = get_pool_info_from_k8s(params.pool)
-        poolname = pool_info['poolname']
-        if is_pool_exists(poolname) and is_pool_started(poolname):
-            op1 = Operation("virsh pool-destroy", {"pool": poolname})
-            op1.execute()
+    pool_info = get_pool_info_from_k8s(params.pool)
+    poolname = pool_info['poolname']
+    if is_pool_exists(poolname) and is_pool_started(poolname):
+        op1 = Operation("virsh pool-destroy", {"pool": poolname})
+        op1.execute()
 
-        pool_info["state"] = "inactive"
-        success_print("stop pool %s successful." % poolname, pool_info)
-    elif params.type == "uus":
-        error_print(500, "not support operation for uus")
+    pool_info["state"] = "inactive"
+    success_print("stop pool %s successful." % poolname, pool_info)
 
 
 def showPool(params):
@@ -320,9 +313,6 @@ def createCloudInitUserDataImage(params):
     check_pool_active(pool_info)
     poolname = pool_info['poolname']
 
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'uus pool %s not support.' % params.pool)
-
     # cfg = '/tmp/%s.cfg' % randomUUID()
     # logger.debug(params.userData)
     # with open(cfg, 'w') as f:
@@ -391,25 +381,24 @@ def deleteDisk(params):
     disk_info = get_vol_info_from_k8s(params.vol)
     poolname = disk_info['poolname']
 
-    if params.type != "uus":
-        pool_info = get_pool_info(poolname)
-        disk_dir = '%s/%s' % (pool_info['path'], params.vol)
-        snapshots_path = '%s/snapshots' % disk_dir
-        with open('%s/config.json' % disk_dir, "r") as f:
-            config = load(f)
-        if os.path.exists(snapshots_path):
-            for file in os.listdir(snapshots_path):
-                if '%s/%s' % (snapshots_path, file) == config['current']:
+    pool_info = get_pool_info(poolname)
+    disk_dir = '%s/%s' % (pool_info['path'], params.vol)
+    snapshots_path = '%s/snapshots' % disk_dir
+    with open('%s/config.json' % disk_dir, "r") as f:
+        config = load(f)
+    if os.path.exists(snapshots_path):
+        for file in os.listdir(snapshots_path):
+            if '%s/%s' % (snapshots_path, file) == config['current']:
+                continue
+            else:
+                try:
+                    ss_info = get_snapshot_info_from_k8s(file)
+                except:
                     continue
-                else:
-                    try:
-                        ss_info = get_snapshot_info_from_k8s(file)
-                    except:
-                        continue
-                    raise ExecuteException('', 'error: disk %s still has snapshot %s.' % (params.vol, file))
+                raise ExecuteException('', 'error: disk %s still has snapshot %s.' % (params.vol, file))
 
-        op = Operation("rm -rf %s" % disk_dir, {})
-        op.execute()
+    op = Operation("rm -rf %s" % disk_dir, {})
+    op.execute()
 
     helper = K8sHelper("VirtualMachineDisk")
     helper.delete(params.vol)
@@ -502,7 +491,6 @@ def cloneDisk(params):
     if disk_node_name == pool_node_name:
         op = Operation('mv %s %s/%s' % (middle_disk_dir, pool_info['path'], params.newname), {})
         op.execute()
-        prepareInfo = disk_prepare(pool_info['poolname'], params.newname, clone_disk_path)
 
         jsondicts = get_disk_jsondict(params.pool, params.newname)
         create_all_jsondict(jsondicts)
@@ -510,7 +498,6 @@ def cloneDisk(params):
         ip = get_node_ip_by_node_name(pool_node_name)
         op = Operation('scp -r %s root@%s:%s' % (middle_disk_dir, ip, clone_disk_dir), {})
         op.execute()
-        prepareInfo = remote_disk_prepare(ip, pool_info['poolname'], params.newname, clone_disk_path)
 
         op = Operation('rm -rf %s' % middle_disk_dir, {})
         op.execute()
@@ -678,21 +665,12 @@ def showDiskSnapshot(params):
 
         result = get_snapshot_info_to_k8s(poolname, params.vol, params.name)
         success_print("success show disk snapshot %s." % params.name, result)
-    elif params.type == "uus":
-        raise ExecuteException("", "not support operation for uus.")
 
 
 def createExternalSnapshot(params):
     disk_info = get_vol_info_from_k8s(params.vol)
     poolname = disk_info['poolname']
-    if params.type != 'uus':
-        # prepare base
-        disk_config = get_disk_config(poolname, params.vol)
-        ss = os.path.basename(disk_config['current'])
-        disk_prepare(poolname, ss, disk_config['current'])
-    else:
-        # prepare base
-        disk_prepare(poolname, params.vol, disk_info['uni'])
+    disk_prepare(poolname, params.vol, disk_info['uni'])
 
     disk_config = get_disk_config(poolname, params.vol)
     if params.domain is None:
@@ -765,13 +743,8 @@ def revertExternalSnapshot(params):
     helper = K8sHelper("VirtualMachineDiskSnapshot")
     k8s_ss_info = helper.get_data(params.name, "volume")
     backing_file = k8s_ss_info['full_backing_filename']
-    if params.type != 'uus':
-        # prepare base
-        disk_config = get_disk_config(poolname, params.vol)
-        disk_prepare(poolname, os.path.basename(backing_file), backing_file)
-    else:
-        # prepare base
-        disk_prepare(poolname, params.vol, pool_info['uni'])
+
+    disk_prepare(poolname, params.vol, pool_info['url'])
 
     if params.domain and is_vm_active(params.domain):
         raise ExecuteException('', 'domain %s is still active, plz stop it first.')
@@ -820,14 +793,8 @@ def deleteExternalSnapshot(params):
     k8s_ss_info = helper.get_data(params.name, "volume")
     backing_file = k8s_ss_info['full_backing_filename']
 
-    if params.type != 'uus':
-        # prepare base
-        disk_config = get_disk_config(poolname, params.vol)
-        disk_prepare(poolname, os.path.basename(backing_file), backing_file)
-        disk_prepare(poolname, os.path.basename(disk_config['current']), disk_config['current'])
-    else:
-        # prepare base
-        disk_prepare(poolname, params.vol, pool_info['uni'])
+    # prepare base
+    disk_prepare(poolname, params.vol, pool_info['url'])
 
     if params.domain:
         specs = get_disks_spec(params.domain)
@@ -919,20 +886,17 @@ def deleteExternalSnapshot(params):
 
 
 def updateDiskCurrent(params):
-    if params.type != "uus":
-        for current in params.current:
-            if params.current.find("snapshots") > 0:
-                config_path = '%s/config.json' % os.path.dirname(os.path.dirname(current))
-            else:
-                config_path = '%s/config.json' % os.path.dirname(current)
-            with open(config_path, "r") as f:
-                config = load(f)
-                config['current'] = current
-            with open(config_path, "w") as f:
-                dump(config, f)
-            success_print("updateDiskCurrent successful.", {})
-    else:
-        error_print(400, "not support operation for uus")
+    for current in params.current:
+        if params.current.find("snapshots") > 0:
+            config_path = '%s/config.json' % os.path.dirname(os.path.dirname(current))
+        else:
+            config_path = '%s/config.json' % os.path.dirname(current)
+        with open(config_path, "r") as f:
+            config = load(f)
+            config['current'] = current
+        with open(config_path, "w") as f:
+            dump(config, f)
+        success_print("updateDiskCurrent successful.", {})
 
 
 def customize(params):
@@ -1074,8 +1038,6 @@ def migrateDiskFunc(sourceVol, targetPool):
     if disk_info['pool'] == pool_info['pool']:
         logger.debug('disk %s has been in pool %s' % (sourceVol, targetPool))
         return
-    # if source_pool_info['pooltype'] != 'uus' and disk_node_name != get_hostname_in_lower_case():
-    #     raise ExecuteException('RunCmdError', 'disk is not in this node.')
     logger.debug(pool_info['pooltype'])
     if pool_info['pooltype'] in ['localfs', 'nfs', 'glusterfs', "vdiskfs"]:
         if source_pool_info['pooltype'] in ['localfs', 'nfs', 'glusterfs', "vdiskfs"]:  # file to file
@@ -1157,7 +1119,6 @@ def migrateDiskFunc(sourceVol, targetPool):
             # # create disk
             # newCreateInfo = cstor_create_disk(pool_info['poolname'], params.vol, disk_info['virtual_size'])
             # uni = newCreateInfo["data"]["uni"]
-            # prepareInfo = cstor_prepare_disk("uus", pool_info['poolname'], params.vol, uni)
             # op = Operation('qemu-img convert -f %s %s -O raw %s' % (disk_info['format'], disk_info['filename'], prepareInfo['data']['path']),
             #                {})
             # op.execute()
@@ -1229,8 +1190,6 @@ def migrateDiskFunc(sourceVol, targetPool):
                 # # create same disk in target pool
                 # newCreateInfo = cstor_create_disk(pool_info['poolname'], params.vol, disk_info['virtual_size'])
                 # uni = newCreateInfo["data"]["uni"]
-                # newPrepareInfo = cstor_prepare_disk("uus", pool_info['poolname'], params.vol, uni)
-                # ofFile = newPrepareInfo["data"]["path"]
                 # # dd
                 # op = Operation('dd if=%s of=%s' % (ifFile, ofFile), {})
                 # op.execute()
@@ -1314,12 +1273,7 @@ def migrateVMDisk(params):
                 continue
             target_pool_info = get_pool_info_from_k8s(pool)
             # check_pool_active(target_pool_info)
-            if source_pool_info['pooltype'] in ['localfs', 'nfs', 'glusterfs', 'vdiskfs'] and target_pool_info[
-                'pooltype'] == 'uus':
-                raise ExecuteException('RunCmdError', 'not support migrate disk file to dev.')
-            if source_pool_info['pooltype'] == 'uus' and target_pool_info['pooltype'] == 'uus' and source_pool_info[
-                'poolname'] != target_pool_info['poolname']:
-                raise ExecuteException('RunCmdError', 'not support migrate disk dev to dev with different poolname.')
+
             migrateVols.append(vol)
             notReleaseVols.append(prepare_info['disk'])
             vp['disk'] = prepare_info['disk']
@@ -1557,15 +1511,10 @@ def backup_vm_disk(domain, pool, disk, version, is_full, full_version, is_backup
     disk_pool_info = get_pool_info_from_k8s(disk_info['pool'])
     check_pool_active(disk_pool_info)
 
-    # if disk_pool_info['pooltype'] == 'uus':
-    #     raise ExecuteException('', 'disk %s is uus type, not support backup.' % disk)
-
     # check backup pool path exist or not
     pool_info = get_pool_info_from_k8s(pool)
     check_pool_active(pool_info)
 
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'disk backup pool can not be uus.')
     if not os.path.exists(pool_info['path']):
         raise ExecuteException('', 'pool %s path %s not exist. plz check it.' % (pool, pool_info['path']))
 
@@ -1692,8 +1641,6 @@ def restore_vm_disk(domain, pool, disk, version, newname, target):
     pool_info = get_pool_info_from_k8s(pool)
     check_pool_active(pool_info)
 
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'disk backup pool can not be uus.')
     if not os.path.exists(pool_info['path']):
         raise ExecuteException('', 'pool %s path %s not exist. plz check it.' % (pool, pool_info['path']))
 
@@ -1720,9 +1667,6 @@ def restore_vm_disk(domain, pool, disk, version, newname, target):
 
         disk_pool_info = get_pool_info_from_k8s(target)
         check_pool_active(disk_pool_info)
-
-        if disk_pool_info['pooltype'] == 'uus':
-            raise ExecuteException('', 'target pooltype must be localfs, nfs, glusterfs or vdiskfs.')
 
         if not os.path.exists(disk_pool_info['path']):
             raise ExecuteException('', 'not exist pool %s mount path %s.' % (target, disk_pool_info['path']))
@@ -1824,12 +1768,6 @@ def backupVM(params):
         disk_pool_info = get_pool_info_from_k8s(disk_info['pool'])
         check_pool_active(disk_pool_info)
 
-        # if disk_pool_info['pooltype'] == 'uus':
-        #     if disk_specs[disk_path] == os_disk_tag:
-        #         raise ExecuteException('', 'uus disk %s is vm os disk, not support backup vm %s' % (
-        #             disk_path, params.domain))
-        #     else:
-        #         continue
         disk_prepare(disk_info['poolname'], disk_info['disk'], disk_info['uni'])
         disk_dir = '%s/%s' % (disk_pool_info['path'], disk_info['disk'])
         if not os.path.exists(disk_dir):
@@ -2406,9 +2344,6 @@ def push_disk_backup(domain, pool, disk, version, remote, port, username, passwo
     pool_info = get_pool_info_from_k8s(pool)
     check_pool_active(pool_info)
 
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'disk %s is uus type, not support backup.' % disk)
-
     disk_backup_dir = '%s/vmbackup/%s/diskbackup/%s' % (pool_info['path'], domain, disk)
     if not os.path.exists(disk_backup_dir):
         os.makedirs(disk_backup_dir)
@@ -2595,8 +2530,6 @@ def clean_disk_backup(domain, pool, disk, versions):
     pool_info = get_pool_info_from_k8s(pool)
     check_pool_active(pool_info)
 
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'disk backup pool can not be uus.')
     if not os.path.exists(pool_info['path']):
         raise ExecuteException('', 'pool %s path %s not exist. plz check it.' % (pool, pool_info['path']))
 
@@ -2632,8 +2565,6 @@ def clean_vm_backup(domain, pool, versions):
     check_pool_active(pool_info)
 
     logger.debug('check_pool_active')
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'disk backup pool can not be uus.')
     if not os.path.exists(pool_info['path']):
         raise ExecuteException('', 'pool %s path %s not exist. plz check it.' % (pool, pool_info['path']))
 
@@ -2743,8 +2674,6 @@ def scanBackup(params):
     pool_info = get_pool_info_from_k8s(params.pool)
     check_pool_active(pool_info)
 
-    if pool_info['pooltype'] == 'uus':
-        raise ExecuteException('', 'disk backup pool can not be uus.')
     if not os.path.exists(pool_info['path']):
         raise ExecuteException('', 'pool %s path %s not exist. plz check it.' % (params.pool, pool_info['path']))
 
